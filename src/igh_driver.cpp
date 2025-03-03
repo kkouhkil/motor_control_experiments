@@ -24,6 +24,20 @@
 /* For using uint32_t format specifier, PRIu32 */
 #include <inttypes.h>
 
+#include <iostream>
+using namespace std;
+
+// 0 --> Position control
+// 1 --> Velocity control
+// 2 --> Torque control
+
+int32_t control_mode_pos_vel_trq = 0;
+
+/* The actual and target values of the drive */
+int32_t actPos0, targetPos0, desAccumulatedPos0 = -150;
+int32_t actVel0, targetVel0 = -5000;
+int32_t actTrq0, targetTrq0 = 0;
+
 /*****************************************************************************/
 /* Comment to disable PDO configuration (i.e. in case the PDO configuration saved in EEPROM is our
    desired configuration.)
@@ -139,7 +153,7 @@ uint64_t system_time_ns(void)
 	clock_gettime(CLOCK_MONOTONIC, &time);
 	time_ns = TIMESPEC2NS(time);
 
-	if (system_time_base > time_nsec)
+	if (system_time_base > time_ns)
 	{
 		printf("%s() error: system_time_base greater than"
 		       " system time (system_time_base: %ld, time: %lu\n",
@@ -257,8 +271,20 @@ void ODwrite(ec_master_t* master, uint16_t slavePos, uint16_t index, uint8_t sub
 
 void initDrive(ec_master_t* master, uint16_t slavePos)
 {
-	/* Mode of operation, CSV */
-	ODwrite(master, slavePos, 0x6060, 0x00, 0x09);  // 0x09 for CSV mode
+	if (control_mode_pos_vel_trq == 0){
+		/* Mode of operation, CSP */
+		// Position mode
+		ODwrite(master, slavePos, 0x6060, 0x00, 0x08);  // 0x08 for CSP mode
+	}else if (control_mode_pos_vel_trq == 1){
+		/* Mode of operation, CSV */
+		// Velocity mode
+		ODwrite(master, slavePos, 0x6060, 0x00, 0x09);  // 0x09 for CSV mode
+	}else if (control_mode_pos_vel_trq == 2){	
+		/* Mode of operation, CST */
+		// Torque mode
+		ODwrite(master, slavePos, 0x6060, 0x00, 0x0A);  // 0x0A for CST mode
+	}
+
 	/* Reset alarm */
 	ODwrite(master, slavePos, 0x6040, 0x00, 0x80);
 }
@@ -343,7 +369,7 @@ uint16_t getDriveState(uint16_t statusWord) {
 }
 
 // Add these control word commands
-#define CONTROL_WORD_SHUTDOWN           0x0006
+#define CONTROL_WORD_SHUTDOWN          0x0006
 #define CONTROL_WORD_SWITCH_ON         0x0007
 #define CONTROL_WORD_ENABLE_OPERATION  0x000F
 #define CONTROL_WORD_FAULT_RESET       0x0080
@@ -608,8 +634,6 @@ int main(int argc, char **argv)
 
 	}
 
-	int32_t actPos0, targetPos0;
-	int32_t actVel0, targetVel0;
 	#ifdef MEASURE_PERF
 	/* The slave time received in the current and the previous cycle */
 	uint32_t t_cur, t_prev;
@@ -634,7 +658,7 @@ int main(int argc, char **argv)
 		/* wakeupTime is also start time of the loop. */
 		/* execTime = endTime - wakeupTime */
 		timespec_sub(&execTime, &endTime, &wakeupTime);
-		printf("Execution time: %lu ns\n", execTime.tv_nsec);
+		// printf("Execution time: %lu ns\n", execTime.tv_nsec);
 		#endif
 
 		/* wakeupTime = wakeupTime + sleepTime */
@@ -665,28 +689,34 @@ int main(int argc, char **argv)
 		/* Read PDOs from the datagram */
 		actPos0 = EC_READ_S32(domain1_pd + actual_position);
 		actVel0 = EC_READ_S32(domain1_pd + actual_velocity);
+		actTrq0 = EC_READ_S32(domain1_pd + actual_torque);
 
-		printf("actPos0: %d \t\t", actPos0);
-		printf("actVel0: %d", actVel0);
+		std::cout << "\nActual position: " << actPos0 << std::endl;
+		std::cout << "Actual velocity: " << actVel0 << std::endl;
+		std::cout << "Actual torque: " << actTrq0 << std::endl;
+
 		/* Process the received data */
-		targetPos0 = actPos0 + 5000;
+		targetPos0 = actPos0 + desAccumulatedPos0;
+		// targetVel0 = actVel0 + desAccumulatedVel0;
+		// targetTrq0 = actTrq0 + desAccumulatedTrq0;
 
-	
 		// Read status word
 		uint16_t statusWord = EC_READ_U16(domain1_pd + statusword);
 		uint16_t state = getDriveState(statusWord);
 		uint16_t cw = 0; // 将变量声明移到switch语句之前
 		
 		// State machine for enabling the drive
+
+		// printf("Current state: %x\n ", state);
 		switch(state) {
 			case STATE_FAULT:
 				cw = CONTROL_WORD_FAULT_RESET;
-				printf("Fault state, sending reset command\n");
+				printf("Fault detected! Status word: 0x%04x\n", statusWord);
 				break;
 				
 			case STATE_SWITCH_ON_DISABLED:
 				cw = CONTROL_WORD_SHUTDOWN;
-				printf("Switch on disabled, sending shutdown command\n");
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord);
 				break;
 				
 			case STATE_READY_TO_SWITCH_ON:
@@ -700,16 +730,25 @@ int main(int argc, char **argv)
 				break;
 				
 			case STATE_OPERATION_ENABLED:
-				// CSV mode operation
-				actVel0 = EC_READ_S32(domain1_pd + actual_velocity);
+
+				// Set constant target position
+				if (control_mode_pos_vel_trq == 0){
+
+					EC_WRITE_S32(domain1_pd + target_position, targetPos0);
+				}else if (control_mode_pos_vel_trq == 1){
+
+					// Set constant target velocity
+					EC_WRITE_S32(domain1_pd + target_velocity, targetVel0);
+				}else if (control_mode_pos_vel_trq == 2){
 				
-				// Set constant target velocity
-				EC_WRITE_S32(domain1_pd + target_velocity, 10000);
-				
+					// printf("Target torque %d\n", targetTrq0);
+					// Set constant target torque
+					EC_WRITE_S32(domain1_pd + target_torque, targetTrq0);
+				}
+								
 				// Keep operation enabled
 				cw = CONTROL_WORD_ENABLE_OPERATION;
 				
-				printf("Velocity: Target=10000, Actual=%d\n", actVel0);
 				break;
 				
 			default:
@@ -757,7 +796,7 @@ int main(int argc, char **argv)
 		#endif
 
 		#ifdef MEASURE_PERF
-		printf("\nTimestamp diff: %" PRIu32 " ns\n\n", t_cur - t_prev);
+		// printf("\nTimestamp diff: %" PRIu32 " ns\n\n", t_cur - t_prev);
 		t_prev = t_cur;
 		#endif
 
