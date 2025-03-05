@@ -1,3 +1,0 @@
-/home/keyhan/kinisi/motor_control_experiments/build/CMakeFiles/igh_driver.dir
-/home/keyhan/kinisi/motor_control_experiments/build/CMakeFiles/edit_cache.dir
-/home/keyhan/kinisi/motor_control_experiments/build/CMakeFiles/rebuild_cache.dir
