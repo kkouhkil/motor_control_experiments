@@ -39,43 +39,14 @@ int32_t actPos5, targetPos5, desAccumulatedPos5 = 0;
 int32_t actPos6, targetPos6, desAccumulatedPos6 = 0;
 
 /*****************************************************************************/
-/* Comment to disable PDO configuration (i.e. in case the PDO configuration saved in EEPROM is our
-   desired configuration.)
-*/
-#define CONFIG_PDOS
-
 /* Comment to disable distributed clocks. */
 #define DC
 
-/* Choose the syncronization method: The reference clock can be either master's, or the reference slave's (slave 0 by default) */
-#ifdef DC
-
-/* Slave0's clock is the reference: no drift. Algorithm from rtai_rtdm_dc example. Work in progress. */
-//#define SYNC_MASTER_TO_REF
-/* Master's clock (CPU) is the reference: lower overhead. */
-#define SYNC_REF_TO_MASTER
-
-#endif
-
-#ifdef DC
-
-/* Comment to disable configuring slave's DC specification (shift time & cycle time) */
-#define CONFIG_DC
-
-#endif
-
-/*****************************************************************************/
-
 /* One motor revolution increments the encoder by 2^19 -1. */
 #define ENCODER_RES 524287
+
 /* The maximum stack size which is guranteed safe to access without faulting. */
 #define MAX_SAFE_STACK (8 * 1024)
-
-/* Uncomment to enable performance measurement. */
-/* Measure the difference in reference slave's clock timstamp each cycle, and print the result,
-   which should be as close to cycleTime as possible. */
-/* Note: Only works with DC enabled. */
-#define MEASURE_PERF
 
 /* Calculate the time it took to complete the loop. */
 #define MEASURE_TIMING
@@ -93,172 +64,10 @@ int32_t actPos6, targetPos6, desAccumulatedPos6 = 0;
 
 #endif
 
-#ifdef CONFIG_DC
-
 /* SYNC0 event happens halfway through the cycle */
 #define SHIFT0 (PERIOD_NS/2)
 
-#endif
-
-/*****************************************************************************/
-/* Note: Anything relying on definition of SYNC_MASTER_TO_REF is essentially copy-pasted from /rtdm_rtai_dc/main.c */
-
-#ifdef SYNC_MASTER_TO_REF
-
-/* First used in system_time_ns() */
-static int64_t  system_time_base = 0LL;
-/* First used in sync_distributed_clocks() */
-static uint64_t dc_time_ns = 0;
-static int32_t  prev_dc_diff_ns = 0;
-/* First used in update_master_clock() */
-static int32_t  dc_diff_ns = 0;
-static unsigned int cycle_ns = PERIOD_NS;
-static uint8_t  dc_started = 0;
-static int64_t  dc_diff_total_ns = 0LL;
-static int64_t  dc_delta_total_ns = 0LL;
-static int      dc_filter_idx = 0;
-static int64_t  dc_adjust_ns;
-#define DC_FILTER_CNT          1024
-/** Return the sign of a number
- *
- * ie -1 for -ve value, 0 for 0, +1 for +ve value
- *
- * \retval the sign of the value
- */
-#define sign(val) \
-    ({ typeof (val) _val = (val); \
-    ((_val > 0) - (_val < 0)); })
-
-static uint64_t dc_start_time_ns = 0LL;
-
-#endif
-
 ec_master_t* master;
-
-/*****************************************************************************/
-
-#ifdef SYNC_MASTER_TO_REF
-
-/** Get the time in ns for the current cpu, adjusted by system_time_base.
- *
- * \attention Rather than calling rt_get_time_ns() directly, all application
- * time calls should use this method instead.
- *
- * \ret The time in ns.
- */
-uint64_t system_time_ns(void)
-{
-	struct timespec time;
-	int64_t time_ns;
-	clock_gettime(CLOCK_MONOTONIC, &time);
-	time_ns = TIMESPEC2NS(time);
-
-	if (system_time_base > time_ns)
-	{
-		printf("%s() error: system_time_base greater than"
-		       " system time (system_time_base: %ld, time: %lu\n",
-			__func__, system_time_base, time_ns);
-		return time_ns;
-	}
-	else
-	{
-		return time_ns - system_time_base;
-	}
-}
-
-
-/** Synchronise the distributed clocks
- */
-void sync_distributed_clocks(void)
-{
-
-	uint32_t ref_time = 0;
-	uint64_t prev_app_time = dc_time_ns;
-
-	dc_time_ns = system_time_ns();
-
-	// set master time in nano-seconds
-	ecrt_master_application_time(master, dc_time_ns);
-
-	// get reference clock time to synchronize master cycle
-	ecrt_master_reference_clock_time(master, &ref_time);
-	dc_diff_ns = (uint32_t) prev_app_time - ref_time;
-
-	// call to sync slaves to ref slave
-	ecrt_master_sync_slave_clocks(master);
-}
-
-
-/** Update the master time based on ref slaves time diff
- *
- * called after the ethercat frame is sent to avoid time jitter in
- * sync_distributed_clocks()
- */
-void update_master_clock(void)
-{
-
-	// calc drift (via un-normalised time diff)
-	int32_t delta = dc_diff_ns - prev_dc_diff_ns;
-	//printf("%d\n", (int) delta);
-	prev_dc_diff_ns = dc_diff_ns;
-
-	// normalise the time diff
-	dc_diff_ns = ((dc_diff_ns + (cycle_ns / 2)) % cycle_ns) - (cycle_ns / 2);
-
-	// only update if primary master
-	if (dc_started)
-	{
-
-		// add to totals
-		dc_diff_total_ns += dc_diff_ns;
-		dc_delta_total_ns += delta;
-		dc_filter_idx++;
-
-		if (dc_filter_idx >= DC_FILTER_CNT)
-		{
-			// add rounded delta average
-			dc_adjust_ns += ((dc_delta_total_ns + (DC_FILTER_CNT / 2)) / DC_FILTER_CNT);
-
-			// and add adjustment for general diff (to pull in drift)
-			dc_adjust_ns += sign(dc_diff_total_ns / DC_FILTER_CNT);
-
-			// limit crazy numbers (0.1% of std cycle time)
-			if (dc_adjust_ns < -1000)
-			{
-				dc_adjust_ns = -1000;
-			}
-			if (dc_adjust_ns > 1000)
-			{
-				dc_adjust_ns =  1000;
-			}
-
-			// reset
-			dc_diff_total_ns = 0LL;
-			dc_delta_total_ns = 0LL;
-			dc_filter_idx = 0;
-		}
-
-		// add cycles adjustment to time base (including a spot adjustment)
-		system_time_base += dc_adjust_ns + sign(dc_diff_ns);
-	}
-	else
-	{
-		dc_started = (dc_diff_ns != 0);
-
-		if (dc_started)
-		{
-			// output first diff
-			printf("First master diff: %d.\n", dc_diff_ns);
-
-			// record the time of this initial cycle
-			dc_start_time_ns = dc_time_ns;
-		}
-	}
-}
-
-#endif
-
-/*****************************************************************************/
 
 void ODwrite(ec_master_t* master, uint16_t slavePos, uint16_t index, uint8_t subIndex, uint8_t objectValue)
 {
@@ -309,7 +118,6 @@ inline void timespec_add(struct timespec* result, struct timespec* time1, struct
 
 }
 
-#ifdef MEASURE_TIMING
 /* Substract two timespec structures (time1 and time2), store the the result in result.
 /* result = time1 - time2 */
 inline void timespec_sub(struct timespec* result, struct timespec* time1, struct timespec* time2)
@@ -327,7 +135,6 @@ inline void timespec_sub(struct timespec* result, struct timespec* time1, struct
 	}
 
 }
-#endif
 
 /*****************************************************************************/
 
@@ -502,7 +309,6 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	#ifdef CONFIG_PDOS
 	/***************************************************/
 	/* Slave 0's structures, obtained from $ethercat cstruct -p 0 */
 	ec_pdo_entry_info_t slave_0_pdo_entries[] = {
@@ -709,12 +515,10 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	#endif
-
-	uint controlword, statusword ,
-	target_position,actual_position,
-	target_velocity,actual_velocity,
-	target_torque,actual_torque, digital_output, digital_input;
+	uint controlword0, statusword0 ,
+	target_position0,actual_position0,
+	target_velocity0,actual_velocity0,
+	target_torque0,actual_torque0, digital_output0, digital_input0;
 
 	uint controlword1, statusword1 ,
 	target_position1,actual_position1,
@@ -749,58 +553,53 @@ int main(int argc, char **argv)
 	ec_pdo_entry_reg_t domain1_regs[] =
 	{
 	// 
-	{0, 0, vendor_id, product_code, 0x607a, 0x00, &target_position     	},
-	{0, 0, vendor_id, product_code, 0x60fe, 0x00, &digital_output      	},
-	{0, 0, vendor_id, product_code, 0x6040, 0x00, &controlword         	},
-	{0, 0, vendor_id, product_code, 0x6064, 0x00, &actual_position     	},
-	{0, 0, vendor_id, product_code, 0x60fd, 0x00, &digital_input       	},
-	{0, 0, vendor_id, product_code, 0x6041, 0x00, &statusword          	},
-	{0, 1, vendor_id, product_code, 0x607a, 0x00, &target_position1     },
-	{0, 1, vendor_id, product_code, 0x60fe, 0x00, &digital_output1      },
-	{0, 1, vendor_id, product_code, 0x6040, 0x00, &controlword1         },
-	{0, 1, vendor_id, product_code, 0x6064, 0x00, &actual_position1     },
-	{0, 1, vendor_id, product_code, 0x60fd, 0x00, &digital_input1       },
-	{0, 1, vendor_id, product_code, 0x6041, 0x00, &statusword1          },
-	{0, 2, vendor_id, product_code, 0x607a, 0x00, &target_position2     },
-	{0, 2, vendor_id, product_code, 0x60fe, 0x00, &digital_output2      },
-	{0, 2, vendor_id, product_code, 0x6040, 0x00, &controlword2         },
-	{0, 2, vendor_id, product_code, 0x6064, 0x00, &actual_position2     },
-	{0, 2, vendor_id, product_code, 0x60fd, 0x00, &digital_input2       },
-	{0, 2, vendor_id, product_code, 0x6041, 0x00, &statusword2        	},
-	{0, 3, vendor_id, product_code, 0x607a, 0x00, &target_position3     },
-	{0, 3, vendor_id, product_code, 0x60fe, 0x00, &digital_output3      },
-	{0, 3, vendor_id, product_code, 0x6040, 0x00, &controlword3         },
-	{0, 3, vendor_id, product_code, 0x6064, 0x00, &actual_position3     },
-	{0, 3, vendor_id, product_code, 0x60fd, 0x00, &digital_input3       },
-	{0, 3, vendor_id, product_code, 0x6041, 0x00, &statusword3        	},
-	{0, 4, vendor_id, product_code, 0x607a, 0x00, &target_position4     },
-	{0, 4, vendor_id, product_code, 0x60fe, 0x00, &digital_output4      },
-	{0, 4, vendor_id, product_code, 0x6040, 0x00, &controlword4         },
-	{0, 4, vendor_id, product_code, 0x6064, 0x00, &actual_position4     },
-	{0, 4, vendor_id, product_code, 0x60fd, 0x00, &digital_input4       },
-	{0, 4, vendor_id, product_code, 0x6041, 0x00, &statusword4        	},
-	{0, 5, vendor_id, product_code, 0x607a, 0x00, &target_position5     },
-	{0, 5, vendor_id, product_code, 0x60fe, 0x00, &digital_output5      },
-	{0, 5, vendor_id, product_code, 0x6040, 0x00, &controlword5         },
-	{0, 5, vendor_id, product_code, 0x6064, 0x00, &actual_position5     },
-	{0, 5, vendor_id, product_code, 0x60fd, 0x00, &digital_input5       },
-	{0, 5, vendor_id, product_code, 0x6041, 0x00, &statusword5        	},
-	{0, 6, vendor_id, product_code, 0x607a, 0x00, &target_position6     },
-	{0, 6, vendor_id, product_code, 0x60fe, 0x00, &digital_output6      },
-	{0, 6, vendor_id, product_code, 0x6040, 0x00, &controlword6         },
-	{0, 6, vendor_id, product_code, 0x6064, 0x00, &actual_position6     },
-	{0, 6, vendor_id, product_code, 0x60fd, 0x00, &digital_input6       },
-	{0, 6, vendor_id, product_code, 0x6041, 0x00, &statusword6        	},
+	{0, 0, vendor_id, product_code, 0x607a, 0x00, &target_position0	},
+	{0, 0, vendor_id, product_code, 0x60fe, 0x00, &digital_output0 	},
+	{0, 0, vendor_id, product_code, 0x6040, 0x00, &controlword0    	},
+	{0, 0, vendor_id, product_code, 0x6064, 0x00, &actual_position0	},
+	{0, 0, vendor_id, product_code, 0x60fd, 0x00, &digital_input0  	},
+	{0, 0, vendor_id, product_code, 0x6041, 0x00, &statusword0     	},
+	{0, 1, vendor_id, product_code, 0x607a, 0x00, &target_position1	},
+	{0, 1, vendor_id, product_code, 0x60fe, 0x00, &digital_output1 	},
+	{0, 1, vendor_id, product_code, 0x6040, 0x00, &controlword1    	},
+	{0, 1, vendor_id, product_code, 0x6064, 0x00, &actual_position1	},
+	{0, 1, vendor_id, product_code, 0x60fd, 0x00, &digital_input1  	},
+	{0, 1, vendor_id, product_code, 0x6041, 0x00, &statusword1     	},
+	{0, 2, vendor_id, product_code, 0x607a, 0x00, &target_position2	},
+	{0, 2, vendor_id, product_code, 0x60fe, 0x00, &digital_output2 	},
+	{0, 2, vendor_id, product_code, 0x6040, 0x00, &controlword2    	},
+	{0, 2, vendor_id, product_code, 0x6064, 0x00, &actual_position2	},
+	{0, 2, vendor_id, product_code, 0x60fd, 0x00, &digital_input2  	},
+	{0, 2, vendor_id, product_code, 0x6041, 0x00, &statusword2    	},
+	{0, 3, vendor_id, product_code, 0x607a, 0x00, &target_position3	},
+	{0, 3, vendor_id, product_code, 0x60fe, 0x00, &digital_output3 	},
+	{0, 3, vendor_id, product_code, 0x6040, 0x00, &controlword3    	},
+	{0, 3, vendor_id, product_code, 0x6064, 0x00, &actual_position3	},
+	{0, 3, vendor_id, product_code, 0x60fd, 0x00, &digital_input3  	},
+	{0, 3, vendor_id, product_code, 0x6041, 0x00, &statusword3    	},
+	{0, 4, vendor_id, product_code, 0x607a, 0x00, &target_position4	},
+	{0, 4, vendor_id, product_code, 0x60fe, 0x00, &digital_output4 	},
+	{0, 4, vendor_id, product_code, 0x6040, 0x00, &controlword4    	},
+	{0, 4, vendor_id, product_code, 0x6064, 0x00, &actual_position4	},
+	{0, 4, vendor_id, product_code, 0x60fd, 0x00, &digital_input4  	},
+	{0, 4, vendor_id, product_code, 0x6041, 0x00, &statusword4    	},
+	{0, 5, vendor_id, product_code, 0x607a, 0x00, &target_position5	},
+	{0, 5, vendor_id, product_code, 0x60fe, 0x00, &digital_output5 	},
+	{0, 5, vendor_id, product_code, 0x6040, 0x00, &controlword5    	},
+	{0, 5, vendor_id, product_code, 0x6064, 0x00, &actual_position5	},
+	{0, 5, vendor_id, product_code, 0x60fd, 0x00, &digital_input5  	},
+	{0, 5, vendor_id, product_code, 0x6041, 0x00, &statusword5    	},
+	{0, 6, vendor_id, product_code, 0x607a, 0x00, &target_position6	},
+	{0, 6, vendor_id, product_code, 0x60fe, 0x00, &digital_output6 	},
+	{0, 6, vendor_id, product_code, 0x6040, 0x00, &controlword6    	},
+	{0, 6, vendor_id, product_code, 0x6064, 0x00, &actual_position6	},
+	{0, 6, vendor_id, product_code, 0x60fd, 0x00, &digital_input6  	},
+	{0, 6, vendor_id, product_code, 0x6041, 0x00, &statusword6    	},
 	{}
 	};
 	/* Creates a new process data domain. */
 	/* For process data exchange, at least one process data domain is needed. */
 	ec_domain_t* domain1 = ecrt_master_create_domain(master);
-
-	/* Registers PDOs for a domain. */
-	/* Returns 0 on success. */
-	printf("Activating master...\n");
-
 
 	//(master, 1);
 	if (ecrt_domain_reg_pdo_entry_list(domain1, domain1_regs))
@@ -809,12 +608,10 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	#ifdef CONFIG_DC
-
 	struct timespec t;
 	clock_gettime(CLOCK_MONOTONIC, &t);
 	ecrt_master_application_time(master, EC_NEWTIMEVAL2NANO(t));
-	/* Do not enable Sync1 */
+
 	ecrt_slave_config_dc(drive0, 0x0300, PERIOD_NS,0, 0, 0);
 	ecrt_slave_config_dc(drive1, 0x0300, PERIOD_NS,0, 0, 0);
 	ecrt_slave_config_dc(drive2, 0x0300, PERIOD_NS,0, 0, 0);
@@ -823,27 +620,10 @@ int main(int argc, char **argv)
 	ecrt_slave_config_dc(drive5, 0x0300, PERIOD_NS,0, 0, 0);
 	ecrt_slave_config_dc(drive6, 0x0300, PERIOD_NS,0, 0, 0);
 
-	#endif
-
-	#ifdef SYNC_REF_TO_MASTER
 	/* Initialize master application time. */
 	struct timespec masterInitTime;
 	clock_gettime(CLOCK_MONOTONIC, &masterInitTime);
 	ecrt_master_application_time(master, TIMESPEC2NS(masterInitTime));
-	#endif
-
-	#ifdef SYNC_MASTER_TO_REF
-	/* Initialize master application time. */
-	dc_start_time_ns = system_time_ns();
-	dc_time_ns = dc_start_time_ns;
-	ecrt_master_application_time(master, dc_start_time_ns);
-
-	if (ecrt_master_select_reference_clock(master, drive0))
-	{
-		printf("Selecting slave 0 as reference clock failed!\n");
-		return -1;
-	}
-	#endif
 
 	/* Up to this point, we have only requested the master. See log messages */
 	printf("Activating master...\n");
@@ -900,11 +680,10 @@ int main(int argc, char **argv)
 
 		ecrt_domain_queue(domain1);
 
-		#ifdef SYNC_REF_TO_MASTER
 		/* Syncing reference slave to master:
-                   1- The master's (PC) clock is the reference.
-		   2- Sync the reference slave's clock to the master's.
-		   3- Sync the other slave clocks to the reference slave's.
+        	1- The master's (PC) clock is the reference.
+		   	2- Sync the reference slave's clock to the master's.
+		   	3- Sync the other slave clocks to the reference slave's.
 		*/
 
 		clock_gettime(CLOCK_MONOTONIC, &time);
@@ -918,51 +697,31 @@ int main(int argc, char **argv)
 		   All slave clocks will be synchronized to the reference slave clock.
 		*/
 		ecrt_master_sync_slave_clocks(master);
-		#endif
-
-		#ifdef SYNC_MASTER_TO_REF
-		// sync distributed clock just before master_send to set
-     	        // most accurate master clock time
-                sync_distributed_clocks();
-		#endif
 
 		ecrt_master_send(master);
-
-		#ifdef SYNC_MASTER_TO_REF
-		// update the master clock
-     		// Note: called after ecrt_master_send() to reduce time
-                // jitter in the sync_distributed_clocks() call
-                update_master_clock();
-		#endif
-
 	}
 
-	#ifdef MEASURE_PERF
 	/* The slave time received in the current and the previous cycle */
 	uint32_t t_cur, t_prev;
-	#endif
 
 	/* Sleep is how long we should sleep each loop to keep the cycle's frequency as close to cycleTime as possible. */
 	struct timespec sleepTime;
-	#ifdef MEASURE_TIMING
+
 	struct timespec execTime, endTime;
-	#endif
 
 	/* Wake up 1 msec after the start of the previous loop. */
 	sleepTime = cycleTime;
+
 	/* Update wakeupTime = current time */
 	clock_gettime(CLOCK_MONOTONIC, &wakeupTime);
 
-
 	while (1)
 	{
-		#ifdef MEASURE_TIMING
 		clock_gettime(CLOCK_MONOTONIC, &endTime);
 		/* wakeupTime is also start time of the loop. */
 		/* execTime = endTime - wakeupTime */
 		timespec_sub(&execTime, &endTime, &wakeupTime);
 		// printf("Execution time: %lu ns\n", execTime.tv_nsec);
-		#endif
 
 		/* wakeupTime = wakeupTime + sleepTime */
 		timespec_add(&wakeupTime, &wakeupTime, &sleepTime);
@@ -974,8 +733,10 @@ int main(int argc, char **argv)
 		   as the sleep ends cycleTime (=1 msecs) *after the start of the previous loop*.
 		*/
 		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wakeupTime, NULL);
+
 		/* Fetches received frames from the newtork device and processes the datagrams. */
 		ecrt_master_receive(master);
+
 		/* Evaluates the working counters of the received datagrams and outputs statistics,
 		   if necessary.
 		   This function is NOT essential to the receive/process/send procedure and can be
@@ -983,22 +744,18 @@ int main(int argc, char **argv)
 		*/
 		ecrt_domain_process(domain1);
 
-		#ifdef MEASURE_PERF
 		ecrt_master_reference_clock_time(master, &t_cur);
-		#endif
 
 		/********************************************************************************/
 
 		/* Read PDOs from the datagram */
-		actPos0 = EC_READ_S32(domain1_pd + actual_position);
+		actPos0 = EC_READ_S32(domain1_pd + actual_position0);
 		actPos1 = EC_READ_S32(domain1_pd + actual_position1);
 		actPos2 = EC_READ_S32(domain1_pd + actual_position2);
 		actPos3 = EC_READ_S32(domain1_pd + actual_position3);
 		actPos4 = EC_READ_S32(domain1_pd + actual_position4);
 		actPos5 = EC_READ_S32(domain1_pd + actual_position5);
 		actPos6 = EC_READ_S32(domain1_pd + actual_position6);
-		// actVel0 = EC_READ_S32(domain1_pd + actual_velocity);
-		// actTrq0 = EC_READ_S32(domain1_pd + actual_torque);
 
 		std::cout << "\nactual position[0]: " << actPos0 << std::endl;
 		std::cout << "actual position[1]: " << actPos1 << std::endl;
@@ -1007,73 +764,346 @@ int main(int argc, char **argv)
 		std::cout << "actual position[4]: " << actPos4 << std::endl;
 		std::cout << "actual position[5]: " << actPos5 << std::endl;
 		std::cout << "actual position[6]: " << actPos6 << std::endl;
-		// std::cout << "Actual velocity: " << actVel0 << std::endl;
-		// std::cout << "Actual torque: " << actTrq0 << std::endl;
 
 		/* Process the received data */
 		targetPos0 = actPos0 + desAccumulatedPos0;
-		// targetVel0 = actVel0 + desAccumulatedVel0;
-		// targetTrq0 = actTrq0 + desAccumulatedTrq0;
+		targetPos1 = actPos1 + desAccumulatedPos1;
+		targetPos2 = actPos2 + desAccumulatedPos2;
+		targetPos3 = actPos3 + desAccumulatedPos3;
+		targetPos4 = actPos4 + desAccumulatedPos4;
+		targetPos5 = actPos5 + desAccumulatedPos5;
+		targetPos6 = actPos6 + desAccumulatedPos6;
 
 		// Read status word
-		uint16_t statusWord = EC_READ_U16(domain1_pd + statusword);
-		uint16_t state = getDriveState(statusWord);
-		uint16_t cw = 0; // 将变量声明移到switch语句之前
-		
-		// State machine for enabling the drive
+		uint16_t statusWord0 = EC_READ_U16(domain1_pd + statusword0);
+		uint16_t state0 = getDriveState(statusWord0);
+		uint16_t cw0 = 0;
 
-		// printf("Current state: %x\n ", state);
-		// switch(state) {
-		// 	case STATE_FAULT:
-		// 		cw = CONTROL_WORD_FAULT_RESET;
-		// 		printf("Fault detected! Status word: 0x%04x\n", statusWord);
-		// 		break;
-				
-		// 	case STATE_SWITCH_ON_DISABLED:
-		// 		cw = CONTROL_WORD_SHUTDOWN;
-		// 		printf("Switch on disabled! Status word: 0x%04x\n", statusWord);
-		// 		break;
-				
-		// 	case STATE_READY_TO_SWITCH_ON:
-		// 		cw = CONTROL_WORD_SWITCH_ON;
-		// 		printf("Ready to switch on, sending switch on command\n");
-		// 		break;
-				
-		// 	case STATE_SWITCHED_ON:
-		// 		cw = CONTROL_WORD_ENABLE_OPERATION;
-		// 		printf("Switched on, sending enable operation command\n");
-		// 		break;
-				
-		// 	case STATE_OPERATION_ENABLED:
+		uint16_t statusWord1 = EC_READ_U16(domain1_pd + statusword1);
+		uint16_t state1 = getDriveState(statusWord1);
+		uint16_t cw1 = 0;
 
-		// 		// Set constant target position
-		// 		if (control_mode_pos_vel_trq == 0){
+		uint16_t statusWord2 = EC_READ_U16(domain1_pd + statusword2);
+		uint16_t state2 = getDriveState(statusWord2);
+		uint16_t cw2 = 0;
 
-		// 			EC_WRITE_S32(domain1_pd + target_position, targetPos0);
-		// 		}else if (control_mode_pos_vel_trq == 1){
+		uint16_t statusWord3 = EC_READ_U16(domain1_pd + statusword3);
+		uint16_t state3 = getDriveState(statusWord3);
+		uint16_t cw3 = 0;
 
-		// 			// Set constant target velocity
-		// 			// EC_WRITE_S32(domain1_pd + target_velocity, targetVel0);
-		// 		}else if (control_mode_pos_vel_trq == 2){
+		uint16_t statusWord4 = EC_READ_U16(domain1_pd + statusword4);
+		uint16_t state4 = getDriveState(statusWord4);
+		uint16_t cw4 = 0;
+
+		uint16_t statusWord5 = EC_READ_U16(domain1_pd + statusword5);
+		uint16_t state5 = getDriveState(statusWord5);
+		uint16_t cw5 = 0;
+
+		uint16_t statusWord6 = EC_READ_U16(domain1_pd + statusword6);
+		uint16_t state6 = getDriveState(statusWord6);
+		uint16_t cw6 = 0;
+
+		std::cout << "state[0]: " << state0 << std::endl;
+		std::cout << "state[1]: " << state1 << std::endl;
+		std::cout << "state[2]: " << state2 << std::endl;
+		std::cout << "state[3]: " << state3 << std::endl;
+		std::cout << "state[4]: " << state4 << std::endl;
+		std::cout << "state[5]: " << state5 << std::endl;
+		std::cout << "state[6]: " << state6 << std::endl;
+
+		// Slave 0
+		switch(state0) {
+			case STATE_FAULT:
+				cw0 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord0);
+				break;
 				
-		// 			// printf("Target torque %d\n", targetTrq0);
-		// 			// Set constant target torque
-		// 			// EC_WRITE_S32(domain1_pd + target_torque, targetTrq0);
-		// 		}
-								
-		// 		// Keep operation enabled
-		// 		cw = CONTROL_WORD_ENABLE_OPERATION;
+			case STATE_SWITCH_ON_DISABLED:
+				cw0 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord0);
+				break;
 				
-		// 		break;
+			case STATE_READY_TO_SWITCH_ON:
+				cw0 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
 				
-		// 	default:
-		// 		cw = CONTROL_WORD_SHUTDOWN;
-		// 		printf("Unknown state (0x%04x), trying shutdown\n", state);
-		// 		break;
-		// }
+			case STATE_SWITCHED_ON:
+				cw0 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position0, targetPos0);
+			
+				// Keep operation enabled
+				cw0 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw0 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state0);
+				break;
+		}
 
 		// Write control word after switch statement
-		// EC_WRITE_U16(domain1_pd + controlword, cw);
+		EC_WRITE_U16(domain1_pd + controlword0, cw0);
+		std::cout << "cw0 ==> " << cw0 << std::endl;
+		
+		// Slave 1
+		switch(state1) {
+			case STATE_FAULT:
+				cw1 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord1);
+				break;
+				
+			case STATE_SWITCH_ON_DISABLED:
+				cw1 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord1);
+				break;
+				
+			case STATE_READY_TO_SWITCH_ON:
+				cw1 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
+				
+			case STATE_SWITCHED_ON:
+				cw1 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position1, targetPos1);
+			
+				// Keep operation enabled
+				cw1 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw1 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state1);
+				break;
+		}
+
+		// Write control word after switch statement
+		EC_WRITE_U16(domain1_pd + controlword1, cw1);
+		std::cout << "cw1 ==> " << cw1 << std::endl;
+
+		// Slave 2
+		switch(state2) {
+			case STATE_FAULT:
+				cw2 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord2);
+				break;
+				
+			case STATE_SWITCH_ON_DISABLED:
+				cw2 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord2);
+				break;
+				
+			case STATE_READY_TO_SWITCH_ON:
+				cw2 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
+				
+			case STATE_SWITCHED_ON:
+				cw2 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position2, targetPos2);
+			
+				// Keep operation enabled
+				cw2 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw2 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state2);
+				break;
+		}
+
+		// Write control word after switch statement
+		EC_WRITE_U16(domain1_pd + controlword2, cw2);
+		std::cout << "cw2 ==> " << cw2 << std::endl;
+
+		// Slave 3
+		switch(state3) {
+			case STATE_FAULT:
+				cw3 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord3);
+				break;
+				
+			case STATE_SWITCH_ON_DISABLED:
+				cw3 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord3);
+				break;
+				
+			case STATE_READY_TO_SWITCH_ON:
+				cw3 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
+				
+			case STATE_SWITCHED_ON:
+				cw3 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position3, targetPos3);
+			
+				// Keep operation enabled
+				cw3 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw3 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state3);
+				break;
+		}
+
+		// Write control word after switch statement
+		EC_WRITE_U16(domain1_pd + controlword3, cw3);
+		std::cout << "cw3 ==> " << cw3 << std::endl;
+
+		// Slave 4
+		switch(state4) {
+			case STATE_FAULT:
+				cw4 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord4);
+				break;
+				
+			case STATE_SWITCH_ON_DISABLED:
+				cw4 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord4);
+				break;
+				
+			case STATE_READY_TO_SWITCH_ON:
+				cw4 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
+				
+			case STATE_SWITCHED_ON:
+				cw4 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position4, targetPos4);
+			
+				// Keep operation enabled
+				cw4 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw4 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state4);
+				break;
+		}
+
+		// Write control word after switch statement
+		EC_WRITE_U16(domain1_pd + controlword4, cw4);
+		std::cout << "cw4 ==> " << cw4 << std::endl;
+
+		// Slave 5
+		switch(state5) {
+			case STATE_FAULT:
+				cw5 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord5);
+				break;
+				
+			case STATE_SWITCH_ON_DISABLED:
+				cw5 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord5);
+				break;
+				
+			case STATE_READY_TO_SWITCH_ON:
+				cw5 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
+				
+			case STATE_SWITCHED_ON:
+				cw5 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position5, targetPos5);
+			
+				// Keep operation enabled
+				cw5 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw5 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state5);
+				break;
+		}
+
+		// Write control word after switch statement
+		EC_WRITE_U16(domain1_pd + controlword5, cw5);
+		std::cout << "cw5 ==> " << cw5 << std::endl;
+
+		// Slave 6
+		switch(state6) {
+			case STATE_FAULT:
+				cw6 = CONTROL_WORD_FAULT_RESET;
+				printf("Fault detected! Status word: 0x%04x\n", statusWord6);
+				break;
+				
+			case STATE_SWITCH_ON_DISABLED:
+				cw6 = CONTROL_WORD_SHUTDOWN;
+				printf("Switch on disabled! Status word: 0x%04x\n", statusWord6);
+				break;
+				
+			case STATE_READY_TO_SWITCH_ON:
+				cw6 = CONTROL_WORD_SWITCH_ON;
+				printf("Ready to switch on, sending switch on command\n");
+				break;
+				
+			case STATE_SWITCHED_ON:
+				cw6 = CONTROL_WORD_ENABLE_OPERATION;
+				printf("Switched on, sending enable operation command\n");
+				break;
+				
+			case STATE_OPERATION_ENABLED:
+
+				// Set constant target position
+				EC_WRITE_S32(domain1_pd + target_position6, targetPos6);
+			
+				// Keep operation enabled
+				cw6 = CONTROL_WORD_ENABLE_OPERATION;
+				
+				break;
+				
+			default:
+				cw6 = CONTROL_WORD_SHUTDOWN;
+				printf("Unknown state (0x%04x), trying shutdown\n", state6);
+				break;
+		}
+
+		// Write control word after switch statement
+		EC_WRITE_U16(domain1_pd + controlword6, cw6);
+		std::cout << "cw6 ==> " << cw6 << std::endl;
 
 		/********************************************************************************/
 
@@ -1083,37 +1113,20 @@ int main(int argc, char **argv)
 		*/
 		ecrt_domain_queue(domain1);
 
-		#ifdef SYNC_REF_TO_MASTER
 		/* Distributed clocks */
 		clock_gettime(CLOCK_MONOTONIC, &time);
 		ecrt_master_application_time(master, TIMESPEC2NS(time));
 		ecrt_master_sync_reference_clock(master);
 		ecrt_master_sync_slave_clocks(master);
-		#endif
-
-		#ifdef SYNC_MASTER_TO_REF
-		// sync distributed clock just before master_send to set
-     	        // most accurate master clock time
-                sync_distributed_clocks();
-		#endif
-
+	
 		/* Sends all datagrams in the queue.
 		   This method takes all datagrams that have been queued for transmission,
 		   puts them into frames, and passes them to the Ethernet device for sending.
 		*/
 		ecrt_master_send(master);
 
-		#ifdef SYNC_MASTER_TO_REF
-		// update the master clock
-     		// Note: called after ecrt_master_send() to reduce time
-                // jitter in the sync_distributed_clocks() call
-                update_master_clock();
-		#endif
-
-		#ifdef MEASURE_PERF
 		// printf("\nTimestamp diff: %" PRIu32 " ns\n\n", t_cur - t_prev);
 		t_prev = t_cur;
-		#endif
 
 	}
 
