@@ -1,6 +1,16 @@
 /* For CPU_ZERO and CPU_SET macros */
 //#define _GNU_SOURCE
 
+/*
+- initialize(): Setup Ethercat and configures slaves
+- start(): Start the operational loop
+- stop(): Stop the operational loop
+- readPDO(): Read values from PDOs
+- wriePDO(): Write values to PDOs
+- stateMachine(): Handles the control word state transition
+- run(): Main loop
+*/
+
 /*****************************************************************************/
 #include <ecrt.h> 
 #include <string.h>
@@ -11,8 +21,6 @@
 #include <unistd.h>
 #include <sys/types.h>
 /* For locking the program in RAM (mlockall) to prevent swapping */
-
-
 
 #include <sys/mman.h>
 /* clock_gettime, struct timespec, etc. */
@@ -31,12 +39,33 @@ using namespace std;
 // 1 --> Velocity control
 // 2 --> Torque control
 
-int32_t control_mode_pos_vel_trq = 0;
+int32_t control_mode_pos_vel_trq = 1;
 
 /* The actual and target values of the drive */
-int32_t actPos0, targetPos0, desAccumulatedPos0 = -150;
-int32_t actVel0, targetVel0 = -5000;
+int32_t actPos0, targetPos0, desAccumulatedPos0 = 0;
+int32_t actVel0, targetVel0 = 0;
 int32_t actTrq0, targetTrq0 = 0;
+
+int32_t actPos1, targetPos1, desAccumulatedPos1 = 0;
+int32_t actVel1, targetVel1 = 0;
+int32_t actTrq1, targetTrq1 = 0;
+
+// TEST
+#define NUM_JOINTS 7
+
+int32_t actPos[NUM_JOINTS], targetPos[NUM_JOINTS], desAccumulatedPos[NUM_JOINTS] = {0};
+int32_t actVel[NUM_JOINTS], targetVel[NUM_JOINTS] = {0};
+int32_t actTrq[NUM_JOINTS], targetTrq[NUM_JOINTS] = {0};
+
+  // Constants for ANSI escape codes to color terminal output
+  const std::string red = "\033[31m";     // ANSI escape code for red text
+  const std::string green = "\033[32m";   // ANSI escape code for green text
+  const std::string yellow = "\033[33m";  // ANSI escape code for yellow text
+  const std::string blue = "\033[34m";    // ANSI escape code for blue text
+  const std::string magenta = "\033[35m"; // ANSI escape code for magenta text
+  const std::string cyan = "\033[36m";    // ANSI escape code for cyan text
+  const std::string white = "\033[37m";   // ANSI escape code for white text
+  const std::string reset = "\033[0m"; // ANSI escape code to reset text color
 
 /*****************************************************************************/
 /* Comment to disable PDO configuration (i.e. in case the PDO configuration saved in EEPROM is our
@@ -464,6 +493,17 @@ int main(int argc, char **argv)
 	//{0x6060, 0x00, 8}, /* Control operation */
 	};
 
+	// ec_pdo_entry_info_t slave_0_pdo_entries[] =
+	// {
+	// 	{0x607a, 0x00, 32}, /* Target Position */
+	// 	{0x60fe, 0x00, 32}, /* Digital outputs */
+	// 	{0x6040, 0x00, 16}, /* Control Word */
+	// 	{0x6064, 0x00, 32}, /* Position Actual Value */
+	// 	{0x60fd, 0x00, 32}, /* Digital inputs */
+	// 	{0x6041, 0x00, 16}, /* Status Word */
+	
+	// };
+
 	ec_pdo_info_t slave_0_pdos[] =
 	{
 	{0x1600, 4, slave_0_pdo_entries + 0}, /* 2nd Receive PDO Mapping */
@@ -494,19 +534,67 @@ int main(int argc, char **argv)
 	target_position,actual_position,
 	target_velocity,actual_velocity,
 	target_torque,actual_torque;
-	
+
+	uint controlword_vec[NUM_JOINTS];
+	uint statusword_vec[NUM_JOINTS];
+	uint actual_position_vec[NUM_JOINTS];
+	uint actual_velocity_vec[NUM_JOINTS];
+	uint actual_torque_vec[NUM_JOINTS];
+	uint target_position_vec[NUM_JOINTS];
+	uint target_velocity_vec[NUM_JOINTS];
+	uint target_torque_vec[NUM_JOINTS];
+	uint digital_output_vec[NUM_JOINTS];
+	uint digital_input_vec[NUM_JOINTS];
+
 	ec_pdo_entry_reg_t domain1_regs[] =
 	{
-	{0, 0, vendor_id, product_code, 0x6040, 0x00, &controlword         },
-	{0, 0, vendor_id, product_code, 0x607a, 0x00, &target_position     },
-	{0, 0, vendor_id, product_code, 0x60FF, 0x00, &target_velocity     },
-	{0, 0, vendor_id, product_code, 0x6071, 0x00, &target_torque       },
-	{0, 0, vendor_id, product_code, 0x6041, 0x00, &statusword          },
-	{0, 0, vendor_id, product_code, 0x6064, 0x00, &actual_position     },
-	{0, 0, vendor_id, product_code, 0x606c, 0x00, &actual_velocity     },
-	{0, 0, vendor_id, product_code, 0x6077, 0x00, &actual_torque       },
+	{0, 0, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[0]    	},
+	{0, 0, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[0]	},
+	{0, 0, vendor_id, product_code, 0x60FF, 0x00, &target_velocity_vec[0]	},
+	{0, 0, vendor_id, product_code, 0x6071, 0x00, &target_torque_vec[0]  	},
+	{0, 0, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[0]     	},
+	{0, 0, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[0]	},
+	{0, 0, vendor_id, product_code, 0x606c, 0x00, &actual_velocity_vec[0]	},
+	{0, 0, vendor_id, product_code, 0x6077, 0x00, &actual_torque_vec[0]		},
+	{0, 1, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[1]	},
+	{0, 1, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[1]	},
+	{0, 1, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[1]		},
+	{0, 1, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[1]	},
+	{0, 1, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[1]		},
+	{0, 1, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[1]		},
+	{0, 2, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[2]	},
+	{0, 2, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[2]	},
+	{0, 2, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[2]		},
+	{0, 2, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[2]	},
+	{0, 2, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[2]		},
+	{0, 2, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[2]		},
+	{0, 3, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[3]	},
+	{0, 3, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[3]	},
+	{0, 3, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[3]		},
+	{0, 3, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[3]	},
+	{0, 3, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[3]		},
+	{0, 3, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[3]		},
+	{0, 4, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[4]	},
+	{0, 4, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[4]	},
+	{0, 4, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[4]		},
+	{0, 4, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[4]	},
+	{0, 4, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[4]		},
+	{0, 4, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[4]		},
+	{0, 5, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[5]	},
+	{0, 5, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[5]	},
+	{0, 5, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[5]		},
+	{0, 5, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[5]	},
+	{0, 5, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[5]		},
+	{0, 5, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[5]		},
+	{0, 6, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[6]	},
+	{0, 6, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[6]	},
+	{0, 6, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[6]		},
+	{0, 6, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[6]	},
+	{0, 6, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[6]		},
+	{0, 6, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[6]		},
 	{}
 	};
+
 	/* Creates a new process data domain. */
 	/* For process data exchange, at least one process data domain is needed. */
 	ec_domain_t* domain1 = ecrt_master_create_domain(master);
@@ -687,23 +775,33 @@ int main(int argc, char **argv)
 		/********************************************************************************/
 
 		/* Read PDOs from the datagram */
-		actPos0 = EC_READ_S32(domain1_pd + actual_position);
-		actVel0 = EC_READ_S32(domain1_pd + actual_velocity);
-		actTrq0 = EC_READ_S32(domain1_pd + actual_torque);
+		actPos0 = EC_READ_S32(domain1_pd + actual_position_vec[0]);
+		// actVel0 = EC_READ_S32(domain1_pd + actual_velocity_vec[0]);
+		// actTrq0 = EC_READ_S32(domain1_pd + actual_torque_vec[0]);
 
-		std::cout << "\nActual position: " << actPos0 << std::endl;
-		std::cout << "Actual velocity: " << actVel0 << std::endl;
-		std::cout << "Actual torque: " << actTrq0 << std::endl;
+		// actPos1 = EC_READ_S32(domain1_pd + actual_position_vec[1]);
+
+		// for (int i = 0; i < NUM_JOINTS; i++){
+		// 	actPos[i] = EC_READ_S32(domain1_pd + actual_position_vec[i]);
+		// 	std::cout << "actual position[" << i << "]: " << actPos[i] << std::endl;
+		// }
+		// std::cout << std::endl;
+		
+		// std::cout << "\nActual position0: " << actPos0 << std::endl;
+		// std::cout << "Actual velocity0: " << actVel0 << std::endl;
+		// std::cout << "Actual torque0: " << actTrq0 << std::endl;
+
+		// std::cout << "\nActual position1: " << actPos1 << std::endl;
 
 		/* Process the received data */
-		targetPos0 = actPos0 + desAccumulatedPos0;
+		targetPos[0] = actPos[0] + desAccumulatedPos0;
 		// targetVel0 = actVel0 + desAccumulatedVel0;
 		// targetTrq0 = actTrq0 + desAccumulatedTrq0;
 
 		// Read status word
-		uint16_t statusWord = EC_READ_U16(domain1_pd + statusword);
+		uint16_t statusWord = EC_READ_U16(domain1_pd + statusword_vec[0]);
 		uint16_t state = getDriveState(statusWord);
-		uint16_t cw = 0; // 将变量声明移到switch语句之前
+		uint16_t cw = 0; 
 		
 		// State machine for enabling the drive
 
@@ -734,16 +832,16 @@ int main(int argc, char **argv)
 				// Set constant target position
 				if (control_mode_pos_vel_trq == 0){
 
-					EC_WRITE_S32(domain1_pd + target_position, targetPos0);
+					EC_WRITE_S32(domain1_pd + target_position_vec[0], targetPos[0]);
 				}else if (control_mode_pos_vel_trq == 1){
 
 					// Set constant target velocity
-					EC_WRITE_S32(domain1_pd + target_velocity, targetVel0);
+					EC_WRITE_S32(domain1_pd + target_velocity_vec[0], targetVel0);
 				}else if (control_mode_pos_vel_trq == 2){
 				
 					// printf("Target torque %d\n", targetTrq0);
 					// Set constant target torque
-					EC_WRITE_S32(domain1_pd + target_torque, targetTrq0);
+					EC_WRITE_S32(domain1_pd + target_torque_vec[0], targetTrq0);
 				}
 								
 				// Keep operation enabled
@@ -758,7 +856,7 @@ int main(int argc, char **argv)
 		}
 
 		// Write control word after switch statement
-		EC_WRITE_U16(domain1_pd + controlword, cw);
+		EC_WRITE_U16(domain1_pd + controlword_vec[0], cw);
 
 		/********************************************************************************/
 
