@@ -1,16 +1,6 @@
 /* For CPU_ZERO and CPU_SET macros */
 //#define _GNU_SOURCE
 
-/*
-- initialize(): Setup Ethercat and configures slaves
-- start(): Start the operational loop
-- stop(): Stop the operational loop
-- readPDO(): Read values from PDOs
-- wriePDO(): Write values to PDOs
-- stateMachine(): Handles the control word state transition
-- run(): Main loop
-*/
-
 /*****************************************************************************/
 #include <ecrt.h> 
 #include <string.h>
@@ -21,6 +11,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 /* For locking the program in RAM (mlockall) to prevent swapping */
+
+
 
 #include <sys/mman.h>
 /* clock_gettime, struct timespec, etc. */
@@ -39,33 +31,18 @@ using namespace std;
 // 1 --> Velocity control
 // 2 --> Torque control
 
-int32_t control_mode_pos_vel_trq = 1;
+int32_t control_mode_pos_vel_trq = 0;
 
 /* The actual and target values of the drive */
 int32_t actPos0, targetPos0, desAccumulatedPos0 = 0;
-int32_t actVel0, targetVel0 = 0;
-int32_t actTrq0, targetTrq0 = 0;
-
 int32_t actPos1, targetPos1, desAccumulatedPos1 = 0;
-int32_t actVel1, targetVel1 = 0;
-int32_t actTrq1, targetTrq1 = 0;
-
-// TEST
-#define NUM_JOINTS 7
-
-int32_t actPos[NUM_JOINTS], targetPos[NUM_JOINTS], desAccumulatedPos[NUM_JOINTS] = {0};
-int32_t actVel[NUM_JOINTS], targetVel[NUM_JOINTS] = {0};
-int32_t actTrq[NUM_JOINTS], targetTrq[NUM_JOINTS] = {0};
-
-  // Constants for ANSI escape codes to color terminal output
-  const std::string red = "\033[31m";     // ANSI escape code for red text
-  const std::string green = "\033[32m";   // ANSI escape code for green text
-  const std::string yellow = "\033[33m";  // ANSI escape code for yellow text
-  const std::string blue = "\033[34m";    // ANSI escape code for blue text
-  const std::string magenta = "\033[35m"; // ANSI escape code for magenta text
-  const std::string cyan = "\033[36m";    // ANSI escape code for cyan text
-  const std::string white = "\033[37m";   // ANSI escape code for white text
-  const std::string reset = "\033[0m"; // ANSI escape code to reset text color
+int32_t actPos2, targetPos2, desAccumulatedPos2 = 0;
+int32_t actPos3, targetPos3, desAccumulatedPos3 = 0;
+int32_t actPos4, targetPos4, desAccumulatedPos4 = 0;
+int32_t actPos5, targetPos5, desAccumulatedPos5 = 0;
+int32_t actPos6, targetPos6, desAccumulatedPos6 = 0;
+// int32_t actVel0, targetVel0 = 0;
+// int32_t actTrq0, targetTrq0 = 0;
 
 /*****************************************************************************/
 /* Comment to disable PDO configuration (i.e. in case the PDO configuration saved in EEPROM is our
@@ -307,11 +284,11 @@ void initDrive(ec_master_t* master, uint16_t slavePos)
 	}else if (control_mode_pos_vel_trq == 1){
 		/* Mode of operation, CSV */
 		// Velocity mode
-		ODwrite(master, slavePos, 0x6060, 0x00, 0x09);  // 0x09 for CSV mode
+		// ODwrite(master, slavePos, 0x6060, 0x00, 0x09);  // 0x09 for CSV mode
 	}else if (control_mode_pos_vel_trq == 2){	
 		/* Mode of operation, CST */
 		// Torque mode
-		ODwrite(master, slavePos, 0x6060, 0x00, 0x0A);  // 0x0A for CST mode
+		// ODwrite(master, slavePos, 0x6060, 0x00, 0x0A);  // 0x0A for CST mode
 	}
 
 	/* Reset alarm */
@@ -458,6 +435,12 @@ int main(int argc, char **argv)
 
 	uint16_t alias = 0;
 	uint16_t position0 = 0;
+	uint16_t position1 = 1;
+	uint16_t position2 = 2;
+	uint16_t position3 = 3;
+	uint16_t position4 = 4;
+	uint16_t position5 = 5;
+	uint16_t position6 = 6;
 	uint32_t vendor_id = 0x5a65726f;
 	uint32_t product_code = 0x00029252;
 
@@ -465,58 +448,226 @@ int main(int argc, char **argv)
 	/* Returns NULL (0) in case of error and pointer to the configuration struct otherwise */
 
 	ec_slave_config_t* drive0 = ecrt_master_slave_config(master, alias, position0, vendor_id, product_code);
+	ec_slave_config_t* drive1 = ecrt_master_slave_config(master, alias, position1, vendor_id, product_code);
+	ec_slave_config_t* drive2 = ecrt_master_slave_config(master, alias, position2, vendor_id, product_code);
+	ec_slave_config_t* drive3 = ecrt_master_slave_config(master, alias, position3, vendor_id, product_code);
+	ec_slave_config_t* drive4 = ecrt_master_slave_config(master, alias, position4, vendor_id, product_code);
+	ec_slave_config_t* drive5 = ecrt_master_slave_config(master, alias, position5, vendor_id, product_code);
+	ec_slave_config_t* drive6 = ecrt_master_slave_config(master, alias, position6, vendor_id, product_code);
 
 	ec_slave_config_state_t slaveState0;
+	ec_slave_config_state_t slaveState1;
+	ec_slave_config_state_t slaveState2;
+	ec_slave_config_state_t slaveState3;
+	ec_slave_config_state_t slaveState4;
+	ec_slave_config_state_t slaveState5;
+	ec_slave_config_state_t slaveState6;
 
 
 	/* If the drive0 = NULL or drive1 = NULL */
 	if (!drive0)
 	{
-		printf("Failed to get slave configuration\n");
+		printf("Failed to get slave0 configuration\n");
+		return -1;
+	}
+
+	if (!drive1)
+	{
+		printf("Failed to get slave1 configuration\n");
+		return -1;
+	}
+
+	if (!drive2)
+	{
+		printf("Failed to get slave2 configuration\n");
+		return -1;
+	}
+
+	if (!drive3)
+	{
+		printf("Failed to get slave3 configuration\n");
+		return -1;
+	}
+
+	if (!drive4)
+	{
+		printf("Failed to get slave4 configuration\n");
+		return -1;
+	}
+
+	if (!drive5)
+	{
+		printf("Failed to get slave5 configuration\n");
+		return -1;
+	}
+
+	if (!drive6)
+	{
+		printf("Failed to get slave6 configuration\n");
 		return -1;
 	}
 
 	#ifdef CONFIG_PDOS
 	/***************************************************/
 	/* Slave 0's structures, obtained from $ethercat cstruct -p 0 */
-	ec_pdo_entry_info_t slave_0_pdo_entries[] =
-	{
-	{0x6040, 0x00, 16}, /* Controlword */
-	{0x607a, 0x00, 32}, /* Target Position */
-	{0x60FF, 0x00, 32}, /* Target Velocity */
-	{0x6071, 0x00, 16}, /* Target Torque */
-
-	{0x6041, 0x00, 16}, /* Statusword */
-	{0x6064, 0x00, 32}, /* Position Actual Value */
-	{0x606c, 0x00, 32}, /* Velocity Actual Value */
-	{0x6077, 0x00, 16}, /* Torque Actual Value */
-	//{0x6060, 0x00, 8}, /* Control operation */
+	ec_pdo_entry_info_t slave_0_pdo_entries[] = {
+		{0x607a, 0x00, 32}, /* Target Position */
+		{0x60fe, 0x00, 32}, /* Digital outputs */
+		{0x6040, 0x00, 16}, /* Control Word */
+		{0x6064, 0x00, 32}, /* Position Actual Value */
+		{0x60fd, 0x00, 32}, /* Digital inputs */
+		{0x6041, 0x00, 16}, /* Status Word */
 	};
-
-	// ec_pdo_entry_info_t slave_0_pdo_entries[] =
-	// {
-	// 	{0x607a, 0x00, 32}, /* Target Position */
-	// 	{0x60fe, 0x00, 32}, /* Digital outputs */
-	// 	{0x6040, 0x00, 16}, /* Control Word */
-	// 	{0x6064, 0x00, 32}, /* Position Actual Value */
-	// 	{0x60fd, 0x00, 32}, /* Digital inputs */
-	// 	{0x6041, 0x00, 16}, /* Status Word */
 	
-	// };
-
-	ec_pdo_info_t slave_0_pdos[] =
-	{
-	{0x1600, 4, slave_0_pdo_entries + 0}, /* 2nd Receive PDO Mapping */
-	{0x1a00, 4, slave_0_pdo_entries + 4}, /* 2nd Transmit PDO Mapping */
+	ec_pdo_info_t slave_0_pdos[] = {
+		{0x1600, 3, slave_0_pdo_entries + 0}, /* R0PDO */
+		{0x1a00, 3, slave_0_pdo_entries + 3}, /* T0PDO */
+	};
+	
+	ec_sync_info_t slave_0_syncs[] = {
+		{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+		{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+		{2, EC_DIR_OUTPUT, 1, slave_0_pdos + 0, EC_WD_ENABLE},
+		{3, EC_DIR_INPUT, 1, slave_0_pdos + 1, EC_WD_DISABLE},
+		{0xff}
 	};
 
-	ec_sync_info_t slave_0_syncs[] =
-	{
-	{0, EC_DIR_OUTPUT, 0, NULL            , EC_WD_DISABLE},
-	{1, EC_DIR_INPUT , 0, NULL            , EC_WD_DISABLE},
-	{2, EC_DIR_OUTPUT, 1, slave_0_pdos + 0, EC_WD_ENABLE},
-	{3, EC_DIR_INPUT , 1, slave_0_pdos + 1, EC_WD_DISABLE},
-	{0xFF}
+	/* Slave 1's structures, obtained from $ethercat cstruct -p 1 */
+	ec_pdo_entry_info_t slave_1_pdo_entries[] = {
+		{0x607a, 0x00, 32}, /* Target Position */
+		{0x60fe, 0x00, 32}, /* Digital outputs */
+		{0x6040, 0x00, 16}, /* Control Word */
+		{0x6064, 0x00, 32}, /* Position Actual Value */
+		{0x60fd, 0x00, 32}, /* Digital inputs */
+		{0x6041, 0x00, 16}, /* Status Word */
+	};
+	
+	ec_pdo_info_t slave_1_pdos[] = {
+		{0x1600, 3, slave_1_pdo_entries + 0}, /* R0PDO */
+		{0x1a00, 3, slave_1_pdo_entries + 3}, /* T0PDO */
+	};
+	
+	ec_sync_info_t slave_1_syncs[] = {
+		{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+		{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+		{2, EC_DIR_OUTPUT, 1, slave_1_pdos + 0, EC_WD_ENABLE},
+		{3, EC_DIR_INPUT, 1, slave_1_pdos + 1, EC_WD_DISABLE},
+		{0xff}
+	};
+
+	/* Slave 2's structures, obtained from $ethercat cstruct -p 1 */
+	ec_pdo_entry_info_t slave_2_pdo_entries[] = {
+			{0x607a, 0x00, 32}, /* Target Position */
+			{0x60fe, 0x00, 32}, /* Digital outputs */
+			{0x6040, 0x00, 16}, /* Control Word */
+			{0x6064, 0x00, 32}, /* Position Actual Value */
+			{0x60fd, 0x00, 32}, /* Digital inputs */
+			{0x6041, 0x00, 16}, /* Status Word */
+	};
+		
+	ec_pdo_info_t slave_2_pdos[] = {
+			{0x1600, 3, slave_2_pdo_entries + 0}, /* R0PDO */
+			{0x1a00, 3, slave_2_pdo_entries + 3}, /* T0PDO */
+	};
+		
+	ec_sync_info_t slave_2_syncs[] = {
+			{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+			{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+			{2, EC_DIR_OUTPUT, 1, slave_2_pdos + 0, EC_WD_ENABLE},
+			{3, EC_DIR_INPUT, 1, slave_2_pdos + 1, EC_WD_DISABLE},
+			{0xff}
+	};
+
+	/* Slave 3's structures, obtained from $ethercat cstruct -p 1 */
+	ec_pdo_entry_info_t slave_3_pdo_entries[] = {
+			{0x607a, 0x00, 32}, /* Target Position */
+			{0x60fe, 0x00, 32}, /* Digital outputs */
+			{0x6040, 0x00, 16}, /* Control Word */
+			{0x6064, 0x00, 32}, /* Position Actual Value */
+			{0x60fd, 0x00, 32}, /* Digital inputs */
+			{0x6041, 0x00, 16}, /* Status Word */
+	};
+		
+	ec_pdo_info_t slave_3_pdos[] = {
+			{0x1600, 3, slave_3_pdo_entries + 0}, /* R0PDO */
+			{0x1a00, 3, slave_3_pdo_entries + 3}, /* T0PDO */
+	};
+		
+	ec_sync_info_t slave_3_syncs[] = {
+			{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+			{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+			{2, EC_DIR_OUTPUT, 1, slave_3_pdos + 0, EC_WD_ENABLE},
+			{3, EC_DIR_INPUT, 1, slave_3_pdos + 1, EC_WD_DISABLE},
+			{0xff}
+	};
+
+	/* Slave 4's structures, obtained from $ethercat cstruct -p 1 */
+	ec_pdo_entry_info_t slave_4_pdo_entries[] = {
+			{0x607a, 0x00, 32}, /* Target Position */
+			{0x60fe, 0x00, 32}, /* Digital outputs */
+			{0x6040, 0x00, 16}, /* Control Word */
+			{0x6064, 0x00, 32}, /* Position Actual Value */
+			{0x60fd, 0x00, 32}, /* Digital inputs */
+			{0x6041, 0x00, 16}, /* Status Word */
+	};
+		
+	ec_pdo_info_t slave_4_pdos[] = {
+			{0x1600, 3, slave_4_pdo_entries + 0}, /* R0PDO */
+			{0x1a00, 3, slave_4_pdo_entries + 3}, /* T0PDO */
+	};
+		
+	ec_sync_info_t slave_4_syncs[] = {
+			{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+			{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+			{2, EC_DIR_OUTPUT, 1, slave_4_pdos + 0, EC_WD_ENABLE},
+			{3, EC_DIR_INPUT, 1, slave_4_pdos + 1, EC_WD_DISABLE},
+			{0xff}
+	};
+
+	/* Slave 5's structures, obtained from $ethercat cstruct -p 1 */
+	ec_pdo_entry_info_t slave_5_pdo_entries[] = {
+				{0x607a, 0x00, 32}, /* Target Position */
+				{0x60fe, 0x00, 32}, /* Digital outputs */
+				{0x6040, 0x00, 16}, /* Control Word */
+				{0x6064, 0x00, 32}, /* Position Actual Value */
+				{0x60fd, 0x00, 32}, /* Digital inputs */
+				{0x6041, 0x00, 16}, /* Status Word */
+		};
+			
+	ec_pdo_info_t slave_5_pdos[] = {
+				{0x1600, 3, slave_5_pdo_entries + 0}, /* R0PDO */
+				{0x1a00, 3, slave_5_pdo_entries + 3}, /* T0PDO */
+	};
+			
+	ec_sync_info_t slave_5_syncs[] = {
+				{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+				{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+				{2, EC_DIR_OUTPUT, 1, slave_5_pdos + 0, EC_WD_ENABLE},
+				{3, EC_DIR_INPUT, 1, slave_5_pdos + 1, EC_WD_DISABLE},
+				{0xff}
+	};
+
+	/* Slave 6's structures, obtained from $ethercat cstruct -p 1 */
+	ec_pdo_entry_info_t slave_6_pdo_entries[] = {
+						{0x607a, 0x00, 32}, /* Target Position */
+						{0x60fe, 0x00, 32}, /* Digital outputs */
+						{0x6040, 0x00, 16}, /* Control Word */
+						{0x6064, 0x00, 32}, /* Position Actual Value */
+						{0x60fd, 0x00, 32}, /* Digital inputs */
+						{0x6041, 0x00, 16}, /* Status Word */
+	};
+					
+	ec_pdo_info_t slave_6_pdos[] = {
+						{0x1600, 3, slave_6_pdo_entries + 0}, /* R0PDO */
+						{0x1a00, 3, slave_6_pdo_entries + 3}, /* T0PDO */
+	};
+					
+	ec_sync_info_t slave_6_syncs[] = {
+						{0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
+						{1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
+						{2, EC_DIR_OUTPUT, 1, slave_6_pdos + 0, EC_WD_ENABLE},
+						{3, EC_DIR_INPUT, 1, slave_6_pdos + 1, EC_WD_DISABLE},
+						{0xff}
 	};
 
 	/***************************************************/
@@ -527,74 +678,126 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
+	if (ecrt_slave_config_pdos(drive1, EC_END, slave_1_syncs))
+	{
+		printf("Failed to configure slave 1 PDOs\n");
+		return -1;
+	}
+
+	if (ecrt_slave_config_pdos(drive2, EC_END, slave_2_syncs))
+	{
+		printf("Failed to configure slave 2 PDOs\n");
+		return -1;
+	}
+
+	if (ecrt_slave_config_pdos(drive3, EC_END, slave_3_syncs))
+	{
+		printf("Failed to configure slave 3 PDOs\n");
+		return -1;
+	}
+
+	if (ecrt_slave_config_pdos(drive4, EC_END, slave_4_syncs))
+	{
+		printf("Failed to configure slave 4 PDOs\n");
+		return -1;
+	}
+
+	if (ecrt_slave_config_pdos(drive5, EC_END, slave_5_syncs))
+	{
+		printf("Failed to configure slave 5 PDOs\n");
+		return -1;
+	}
+
+	if (ecrt_slave_config_pdos(drive6, EC_END, slave_6_syncs))
+	{
+		printf("Failed to configure slave 6 PDOs\n");
+		return -1;
+	}
 
 	#endif
 
 	uint controlword, statusword ,
 	target_position,actual_position,
 	target_velocity,actual_velocity,
-	target_torque,actual_torque;
+	target_torque,actual_torque, digital_output, digital_input;
 
-	uint controlword_vec[NUM_JOINTS];
-	uint statusword_vec[NUM_JOINTS];
-	uint actual_position_vec[NUM_JOINTS];
-	uint actual_velocity_vec[NUM_JOINTS];
-	uint actual_torque_vec[NUM_JOINTS];
-	uint target_position_vec[NUM_JOINTS];
-	uint target_velocity_vec[NUM_JOINTS];
-	uint target_torque_vec[NUM_JOINTS];
-	uint digital_output_vec[NUM_JOINTS];
-	uint digital_input_vec[NUM_JOINTS];
+	uint controlword1, statusword1 ,
+	target_position1,actual_position1,
+	target_velocity1,actual_velocity1,
+	target_torque1,actual_torque1, digital_output1, digital_input1;
+
+	uint controlword2, statusword2 ,
+	target_position2,actual_position2,
+	target_velocity2,actual_velocity2,
+	target_torque2,actual_torque2, digital_output2, digital_input2;
+
+	uint controlword3, statusword3 ,
+	target_position3,actual_position3,
+	target_velocity3,actual_velocity3,
+	target_torque3,actual_torque3, digital_output3, digital_input3;
+
+	uint controlword4, statusword4 ,
+	target_position4,actual_position4,
+	target_velocity4,actual_velocity4,
+	target_torque4,actual_torque4, digital_output4, digital_input4;
+
+	uint controlword5, statusword5 ,
+	target_position5,actual_position5,
+	target_velocity5,actual_velocity5,
+	target_torque5,actual_torque5, digital_output5, digital_input5;
+
+	uint controlword6, statusword6 ,
+	target_position6,actual_position6,
+	target_velocity6,actual_velocity6,
+	target_torque6,actual_torque6, digital_output6, digital_input6;
 
 	ec_pdo_entry_reg_t domain1_regs[] =
 	{
-	{0, 0, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[0]    	},
-	{0, 0, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[0]	},
-	{0, 0, vendor_id, product_code, 0x60FF, 0x00, &target_velocity_vec[0]	},
-	{0, 0, vendor_id, product_code, 0x6071, 0x00, &target_torque_vec[0]  	},
-	{0, 0, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[0]     	},
-	{0, 0, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[0]	},
-	{0, 0, vendor_id, product_code, 0x606c, 0x00, &actual_velocity_vec[0]	},
-	{0, 0, vendor_id, product_code, 0x6077, 0x00, &actual_torque_vec[0]		},
-	{0, 1, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[1]	},
-	{0, 1, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[1]	},
-	{0, 1, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[1]		},
-	{0, 1, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[1]	},
-	{0, 1, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[1]		},
-	{0, 1, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[1]		},
-	{0, 2, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[2]	},
-	{0, 2, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[2]	},
-	{0, 2, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[2]		},
-	{0, 2, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[2]	},
-	{0, 2, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[2]		},
-	{0, 2, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[2]		},
-	{0, 3, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[3]	},
-	{0, 3, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[3]	},
-	{0, 3, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[3]		},
-	{0, 3, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[3]	},
-	{0, 3, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[3]		},
-	{0, 3, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[3]		},
-	{0, 4, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[4]	},
-	{0, 4, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[4]	},
-	{0, 4, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[4]		},
-	{0, 4, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[4]	},
-	{0, 4, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[4]		},
-	{0, 4, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[4]		},
-	{0, 5, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[5]	},
-	{0, 5, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[5]	},
-	{0, 5, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[5]		},
-	{0, 5, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[5]	},
-	{0, 5, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[5]		},
-	{0, 5, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[5]		},
-	{0, 6, vendor_id, product_code, 0x607a, 0x00, &target_position_vec[6]	},
-	{0, 6, vendor_id, product_code, 0x60fe, 0x00, &digital_output_vec[6]	},
-	{0, 6, vendor_id, product_code, 0x6040, 0x00, &controlword_vec[6]		},
-	{0, 6, vendor_id, product_code, 0x6064, 0x00, &actual_position_vec[6]	},
-	{0, 6, vendor_id, product_code, 0x60fd, 0x00, &digital_input_vec[6]		},
-	{0, 6, vendor_id, product_code, 0x6041, 0x00, &statusword_vec[6]		},
+	// 
+	{0, 0, vendor_id, product_code, 0x607a, 0x00, &target_position     	},
+	{0, 0, vendor_id, product_code, 0x60fe, 0x00, &digital_output      	},
+	{0, 0, vendor_id, product_code, 0x6040, 0x00, &controlword         	},
+	{0, 0, vendor_id, product_code, 0x6064, 0x00, &actual_position     	},
+	{0, 0, vendor_id, product_code, 0x60fd, 0x00, &digital_input       	},
+	{0, 0, vendor_id, product_code, 0x6041, 0x00, &statusword          	},
+	{0, 1, vendor_id, product_code, 0x607a, 0x00, &target_position1     },
+	{0, 1, vendor_id, product_code, 0x60fe, 0x00, &digital_output1      },
+	{0, 1, vendor_id, product_code, 0x6040, 0x00, &controlword1         },
+	{0, 1, vendor_id, product_code, 0x6064, 0x00, &actual_position1     },
+	{0, 1, vendor_id, product_code, 0x60fd, 0x00, &digital_input1       },
+	{0, 1, vendor_id, product_code, 0x6041, 0x00, &statusword1          },
+	{0, 2, vendor_id, product_code, 0x607a, 0x00, &target_position2     },
+	{0, 2, vendor_id, product_code, 0x60fe, 0x00, &digital_output2      },
+	{0, 2, vendor_id, product_code, 0x6040, 0x00, &controlword2         },
+	{0, 2, vendor_id, product_code, 0x6064, 0x00, &actual_position2     },
+	{0, 2, vendor_id, product_code, 0x60fd, 0x00, &digital_input2       },
+	{0, 2, vendor_id, product_code, 0x6041, 0x00, &statusword2        	},
+	{0, 3, vendor_id, product_code, 0x607a, 0x00, &target_position3     },
+	{0, 3, vendor_id, product_code, 0x60fe, 0x00, &digital_output3      },
+	{0, 3, vendor_id, product_code, 0x6040, 0x00, &controlword3         },
+	{0, 3, vendor_id, product_code, 0x6064, 0x00, &actual_position3     },
+	{0, 3, vendor_id, product_code, 0x60fd, 0x00, &digital_input3       },
+	{0, 3, vendor_id, product_code, 0x6041, 0x00, &statusword3        	},
+	{0, 4, vendor_id, product_code, 0x607a, 0x00, &target_position4     },
+	{0, 4, vendor_id, product_code, 0x60fe, 0x00, &digital_output4      },
+	{0, 4, vendor_id, product_code, 0x6040, 0x00, &controlword4         },
+	{0, 4, vendor_id, product_code, 0x6064, 0x00, &actual_position4     },
+	{0, 4, vendor_id, product_code, 0x60fd, 0x00, &digital_input4       },
+	{0, 4, vendor_id, product_code, 0x6041, 0x00, &statusword4        	},
+	{0, 5, vendor_id, product_code, 0x607a, 0x00, &target_position5     },
+	{0, 5, vendor_id, product_code, 0x60fe, 0x00, &digital_output5      },
+	{0, 5, vendor_id, product_code, 0x6040, 0x00, &controlword5         },
+	{0, 5, vendor_id, product_code, 0x6064, 0x00, &actual_position5     },
+	{0, 5, vendor_id, product_code, 0x60fd, 0x00, &digital_input5       },
+	{0, 5, vendor_id, product_code, 0x6041, 0x00, &statusword5        	},
+	{0, 6, vendor_id, product_code, 0x607a, 0x00, &target_position6     },
+	{0, 6, vendor_id, product_code, 0x60fe, 0x00, &digital_output6      },
+	{0, 6, vendor_id, product_code, 0x6040, 0x00, &controlword6         },
+	{0, 6, vendor_id, product_code, 0x6064, 0x00, &actual_position6     },
+	{0, 6, vendor_id, product_code, 0x60fd, 0x00, &digital_input6       },
+	{0, 6, vendor_id, product_code, 0x6041, 0x00, &statusword6        	},
 	{}
 	};
-
 	/* Creates a new process data domain. */
 	/* For process data exchange, at least one process data domain is needed. */
 	ec_domain_t* domain1 = ecrt_master_create_domain(master);
@@ -618,7 +821,12 @@ int main(int argc, char **argv)
 	ecrt_master_application_time(master, EC_NEWTIMEVAL2NANO(t));
 	/* Do not enable Sync1 */
 	ecrt_slave_config_dc(drive0, 0x0300, PERIOD_NS,0, 0, 0);
-
+	ecrt_slave_config_dc(drive1, 0x0300, PERIOD_NS,0, 0, 0);
+	ecrt_slave_config_dc(drive2, 0x0300, PERIOD_NS,0, 0, 0);
+	ecrt_slave_config_dc(drive3, 0x0300, PERIOD_NS,0, 0, 0);
+	ecrt_slave_config_dc(drive4, 0x0300, PERIOD_NS,0, 0, 0);
+	ecrt_slave_config_dc(drive5, 0x0300, PERIOD_NS,0, 0, 0);
+	ecrt_slave_config_dc(drive6, 0x0300, PERIOD_NS,0, 0, 0);
 
 	#endif
 
@@ -677,6 +885,60 @@ int main(int argc, char **argv)
 		ecrt_slave_config_state(drive0, &slaveState0);
 
 		if (slaveState0.operational)
+		{
+			printf("All slaves have reached OP state\n");
+			//initDrive(master, 0);
+			break;
+		}
+
+		ecrt_slave_config_state(drive1, &slaveState1);
+
+		if (slaveState1.operational)
+		{
+			printf("All slaves have reached OP state\n");
+			//initDrive(master, 0);
+			break;
+		}
+
+		ecrt_slave_config_state(drive2, &slaveState2);
+
+		if (slaveState2.operational)
+		{
+			printf("All slaves have reached OP state\n");
+			//initDrive(master, 0);
+			break;
+		}
+
+		ecrt_slave_config_state(drive3, &slaveState3);
+
+		if (slaveState3.operational)
+		{
+			printf("All slaves have reached OP state\n");
+			//initDrive(master, 0);
+			break;
+		}
+
+		ecrt_slave_config_state(drive4, &slaveState4);
+
+		if (slaveState4.operational)
+		{
+			printf("All slaves have reached OP state\n");
+			//initDrive(master, 0);
+			break;
+		}
+
+		ecrt_slave_config_state(drive5, &slaveState5);
+
+		if (slaveState5.operational)
+		{
+			printf("All slaves have reached OP state\n");
+			//initDrive(master, 0);
+			break;
+		}
+
+		ecrt_slave_config_state(drive6, &slaveState6);
+
+		if (slaveState6.operational)
 		{
 			printf("All slaves have reached OP state\n");
 			//initDrive(master, 0);
@@ -775,33 +1037,35 @@ int main(int argc, char **argv)
 		/********************************************************************************/
 
 		/* Read PDOs from the datagram */
-		actPos0 = EC_READ_S32(domain1_pd + actual_position_vec[0]);
-		// actVel0 = EC_READ_S32(domain1_pd + actual_velocity_vec[0]);
-		// actTrq0 = EC_READ_S32(domain1_pd + actual_torque_vec[0]);
+		actPos0 = EC_READ_S32(domain1_pd + actual_position);
+		actPos1 = EC_READ_S32(domain1_pd + actual_position1);
+		actPos2 = EC_READ_S32(domain1_pd + actual_position2);
+		actPos3 = EC_READ_S32(domain1_pd + actual_position3);
+		actPos4 = EC_READ_S32(domain1_pd + actual_position4);
+		actPos5 = EC_READ_S32(domain1_pd + actual_position5);
+		actPos6 = EC_READ_S32(domain1_pd + actual_position6);
+		// actVel0 = EC_READ_S32(domain1_pd + actual_velocity);
+		// actTrq0 = EC_READ_S32(domain1_pd + actual_torque);
 
-		// actPos1 = EC_READ_S32(domain1_pd + actual_position_vec[1]);
-
-		// for (int i = 0; i < NUM_JOINTS; i++){
-		// 	actPos[i] = EC_READ_S32(domain1_pd + actual_position_vec[i]);
-		// 	std::cout << "actual position[" << i << "]: " << actPos[i] << std::endl;
-		// }
-		// std::cout << std::endl;
-		
-		// std::cout << "\nActual position0: " << actPos0 << std::endl;
-		// std::cout << "Actual velocity0: " << actVel0 << std::endl;
-		// std::cout << "Actual torque0: " << actTrq0 << std::endl;
-
-		// std::cout << "\nActual position1: " << actPos1 << std::endl;
+		std::cout << "\nactual position[0]: " << actPos0 << std::endl;
+		std::cout << "actual position[1]: " << actPos1 << std::endl;
+		std::cout << "actual position[2]: " << actPos2 << std::endl;
+		std::cout << "actual position[3]: " << actPos3 << std::endl;
+		std::cout << "actual position[4]: " << actPos4 << std::endl;
+		std::cout << "actual position[5]: " << actPos5 << std::endl;
+		std::cout << "actual position[6]: " << actPos6 << std::endl;
+		// std::cout << "Actual velocity: " << actVel0 << std::endl;
+		// std::cout << "Actual torque: " << actTrq0 << std::endl;
 
 		/* Process the received data */
-		targetPos[0] = actPos[0] + desAccumulatedPos0;
+		targetPos0 = actPos0 + desAccumulatedPos0;
 		// targetVel0 = actVel0 + desAccumulatedVel0;
 		// targetTrq0 = actTrq0 + desAccumulatedTrq0;
 
 		// Read status word
-		uint16_t statusWord = EC_READ_U16(domain1_pd + statusword_vec[0]);
+		uint16_t statusWord = EC_READ_U16(domain1_pd + statusword);
 		uint16_t state = getDriveState(statusWord);
-		uint16_t cw = 0; 
+		uint16_t cw = 0; // 将变量声明移到switch语句之前
 		
 		// State machine for enabling the drive
 
@@ -832,16 +1096,16 @@ int main(int argc, char **argv)
 				// Set constant target position
 				if (control_mode_pos_vel_trq == 0){
 
-					EC_WRITE_S32(domain1_pd + target_position_vec[0], targetPos[0]);
+					EC_WRITE_S32(domain1_pd + target_position, targetPos0);
 				}else if (control_mode_pos_vel_trq == 1){
 
 					// Set constant target velocity
-					EC_WRITE_S32(domain1_pd + target_velocity_vec[0], targetVel0);
+					// EC_WRITE_S32(domain1_pd + target_velocity, targetVel0);
 				}else if (control_mode_pos_vel_trq == 2){
 				
 					// printf("Target torque %d\n", targetTrq0);
 					// Set constant target torque
-					EC_WRITE_S32(domain1_pd + target_torque_vec[0], targetTrq0);
+					// EC_WRITE_S32(domain1_pd + target_torque, targetTrq0);
 				}
 								
 				// Keep operation enabled
@@ -856,7 +1120,7 @@ int main(int argc, char **argv)
 		}
 
 		// Write control word after switch statement
-		EC_WRITE_U16(domain1_pd + controlword_vec[0], cw);
+		// EC_WRITE_U16(domain1_pd + controlword, cw);
 
 		/********************************************************************************/
 
